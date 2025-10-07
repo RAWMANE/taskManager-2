@@ -1,6 +1,16 @@
 import * as Location from 'expo-location';
 
 export const geocodingService = {
+  // Запрос разрешений на геолокацию
+  async requestLocationPermission() {
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      return { status };
+    } catch (error) {
+      console.log('Ошибка запроса разрешений:', error);
+      return { status: 'denied' };
+    }
+  },
   // Геокодирование - преобразование адреса в координаты
   async addressToCoordinates(address) {
     try {

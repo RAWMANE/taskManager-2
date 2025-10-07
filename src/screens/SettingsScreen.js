@@ -7,7 +7,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const SettingsScreen = () => {
   const { theme, toggleTheme, colors } = useTheme();
-  const { tasks, history } = useTask();
+  const { tasks, history, testNotification } = useTask();
 
   const ThemeButton = ({ title, value, description, icon }) => (
     <TouchableOpacity
@@ -206,6 +206,45 @@ const SettingsScreen = () => {
               fontSize: 14 
             }}>
               Задачи: {tasks.length}, Действия: {history.length}
+            </Text>
+          </View>
+          
+          <Ionicons name="chevron-forward" size={20} color={colors.subtitle} />
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            padding: 16,
+            backgroundColor: colors.card,
+            marginVertical: 6,
+            marginHorizontal: 16,
+            borderRadius: 12,
+          }}
+          onPress={testNotification}
+        >
+          <Ionicons 
+            name="notifications-outline" 
+            size={24} 
+            color={colors.primary} 
+            style={{ marginRight: 12 }}
+          />
+          
+          <View style={{ flex: 1 }}>
+            <Text style={{ 
+              color: colors.text, 
+              fontSize: 16, 
+              fontWeight: '600',
+              marginBottom: 2 
+            }}>
+              Тест уведомлений
+            </Text>
+            <Text style={{ 
+              color: colors.subtitle, 
+              fontSize: 14 
+            }}>
+              Проверить работу push-уведомлений
             </Text>
           </View>
           

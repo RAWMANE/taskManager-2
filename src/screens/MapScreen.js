@@ -1,6 +1,15 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, Dimensions, TouchableOpacity, Alert } from 'react-native';
-import MapView, { Marker } from 'react-native-maps';
+import React, { useState, useEffect, useRef } from 'react';
+import {
+  View,
+  Text,
+  Dimensions,
+  TouchableOpacity,
+  Alert,
+  Platform,
+  ActivityIndicator,
+  Linking
+} from 'react-native';
+import { WebView } from 'react-native-webview';
 import { useTheme } from '../context/ThemeContext';
 import { useTask } from '../context/TaskContext';
 import { geocodingService } from '../services/geocodingService';
@@ -13,23 +22,18 @@ const MapScreen = () => {
   const { tasks } = useTask();
   const [tasksWithCoordinates, setTasksWithCoordinates] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [userLocation, setUserLocation] = useState(null);
+  const [mapError, setMapError] = useState(null);
+  const [selectedTask, setSelectedTask] = useState(null);
+  const webViewRef = useRef(null);
 
-  // Получаем координаты для всех задач с местоположением
+  // Получаем задачи с координатами
   useEffect(() => {
     loadTasksCoordinates();
-    getUserLocation();
   }, [tasks]);
-
-  const getUserLocation = async () => {
-    const location = await geocodingService.getCurrentLocation();
-    if (location) {
-      setUserLocation(location);
-    }
-  };
 
   const loadTasksCoordinates = async () => {
     setIsLoading(true);
+    setMapError(null);
     
     const tasksWithLocation = tasks.filter(task => 
       task.location && task.location.trim() !== ''
@@ -55,41 +59,103 @@ const MapScreen = () => {
     setIsLoading(false);
   };
 
+  // Генерируем HTML с картой OpenStreetMap
+  const generateMapHTML = () => {
+    const markers = tasksWithCoordinates.map((task, index) => `
+      var marker${index} = L.marker([${task.coordinates.latitude}, ${task.coordinates.longitude}])
+        .addTo(map)
+        .bindPopup('<b>${task.title.replace(/'/g, "\\'")}</b><br/>${(task.description || '').replace(/'/g, "\\'")}<br/><small>Выполнить: ${new Date(task.dueDate).toLocaleString('ru-RU')}</small>');
+    `).join('\n');
+
+    return `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Карта задач</title>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+        <style>
+          body { margin: 0; padding: 0; }
+          #map { height: 100vh; width: 100vw; }
+          .leaflet-popup-content { font-family: -apple-system, BlinkMacSystemFont, sans-serif; }
+        </style>
+      </head>
+      <body>
+        <div id="map"></div>
+        
+        <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+        <script>
+          var map = L.map('map').setView([53.9045, 27.5615], 6);
+          
+          L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors',
+            maxZoom: 18
+          }).addTo(map);
+          
+          ${markers}
+          
+          // Автоматически подгоняем карту под все маркеры
+          if (${tasksWithCoordinates.length} > 0) {
+            var group = new L.featureGroup([${tasksWithCoordinates.map((_, i) => `marker${i}`).join(',')}]);
+            map.fitBounds(group.getBounds().pad(0.1));
+          }
+          
+          // Отправляем данные обратно в React Native при клике на маркер
+          function onMarkerClick(index) {
+            if (window.ReactNativeWebView) {
+              window.ReactNativeWebView.postMessage(JSON.stringify({
+                type: 'markerClick',
+                index: index
+              }));
+            }
+          }
+          
+          // Добавляем обработчики кликов
+          ${tasksWithCoordinates.map((_, index) => `
+            marker${index}.on('click', function() { onMarkerClick(${index}); });
+          `).join('\n')}
+        </script>
+      </body>
+      </html>
+    `;
+  };
+
+  // Обработка сообщений из WebView
+  const handleWebViewMessage = (event) => {
+    try {
+      const data = JSON.parse(event.nativeEvent.data);
+      if (data.type === 'markerClick' && tasksWithCoordinates[data.index]) {
+        setSelectedTask(tasksWithCoordinates[data.index]);
+      }
+    } catch (error) {
+      console.log('Ошибка обработки сообщения:', error);
+    }
+  };
+
   const refreshLocations = async () => {
     Alert.alert('Обновление', 'Обновляем координаты задач...');
     await loadTasksCoordinates();
   };
 
-  const getMapRegion = () => {
-    if (tasksWithCoordinates.length === 0) {
-      // Центр Европы по умолчанию
-      return {
-        latitude: 53.9045,
-        longitude: 27.5615,
-        latitudeDelta: 15,
-        longitudeDelta: 15,
-      };
-    }
-
-    // Вычисляем регион чтобы охватить все маркеры
-    const latitudes = tasksWithCoordinates.map(task => task.coordinates.latitude);
-    const longitudes = tasksWithCoordinates.map(task => task.coordinates.longitude);
+  const openInExternalMaps = (task) => {
+    const url = Platform.OS === 'ios' 
+      ? `http://maps.apple.com/?ll=${task.coordinates.latitude},${task.coordinates.longitude}&q=${encodeURIComponent(task.location)}`
+      : `https://www.google.com/maps/search/?api=1&query=${task.coordinates.latitude},${task.coordinates.longitude}`;
     
-    const minLat = Math.min(...latitudes);
-    const maxLat = Math.max(...latitudes);
-    const minLng = Math.min(...longitudes);
-    const maxLng = Math.max(...longitudes);
-    
-    const latitudeDelta = (maxLat - minLat) * 1.5;
-    const longitudeDelta = (maxLng - minLng) * 1.5;
-    
-    return {
-      latitude: (minLat + maxLat) / 2,
-      longitude: (minLng + maxLng) / 2,
-      latitudeDelta: Math.max(latitudeDelta, 1),
-      longitudeDelta: Math.max(longitudeDelta, 1),
-    };
+    Linking.openURL(url);
   };
+
+  if (isLoading) {
+    return (
+      <View style={{ flex: 1, backgroundColor: colors.background, justifyContent: 'center', alignItems: 'center' }}>
+        <ActivityIndicator size="large" color={colors.primary} />
+        <Text style={{ color: colors.text, marginTop: 16, fontSize: 16 }}>
+          Загрузка карты...
+        </Text>
+      </View>
+    );
+  }
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
@@ -103,7 +169,7 @@ const MapScreen = () => {
         justifyContent: 'space-between',
         alignItems: 'center',
       }}>
-        <View>
+        <View style={{ flex: 1 }}>
           <Text style={{ 
             color: colors.text, 
             fontSize: 28, 
@@ -114,9 +180,9 @@ const MapScreen = () => {
           </Text>
           <Text style={{ 
             color: colors.subtitle, 
-            fontSize: 16 
+            fontSize: 14 
           }}>
-            {isLoading ? 'Загрузка...' : `${tasksWithCoordinates.length} задач на карте`}
+            {tasksWithCoordinates.length} задач на карте • OpenStreetMap
           </Text>
         </View>
         
@@ -125,8 +191,6 @@ const MapScreen = () => {
             backgroundColor: colors.primary,
             padding: 10,
             borderRadius: 8,
-            flexDirection: 'row',
-            alignItems: 'center',
           }}
           onPress={refreshLocations}
         >
@@ -134,48 +198,7 @@ const MapScreen = () => {
         </TouchableOpacity>
       </View>
 
-      {isLoading ? (
-        <View style={{ 
-          flex: 1, 
-          justifyContent: 'center', 
-          alignItems: 'center' 
-        }}>
-          <Ionicons name="map-outline" size={64} color={colors.subtitle} />
-          <Text style={{ 
-            color: colors.subtitle, 
-            fontSize: 16, 
-            marginTop: 16 
-          }}>
-            Загрузка карты...
-          </Text>
-        </View>
-      ) : tasksWithCoordinates.length > 0 ? (
-        <MapView
-          style={{ flex: 1 }}
-          initialRegion={getMapRegion()}
-          showsUserLocation={true}
-          showsMyLocationButton={true}
-        >
-          {/* Маркер пользователя */}
-          {userLocation && (
-            <Marker
-              coordinate={userLocation}
-              title="Ваше местоположение"
-              pinColor={colors.primary}
-            />
-          )}
-
-          {/* Маркеры задач */}
-          {tasksWithCoordinates.map((task) => (
-            <Marker
-              key={task.id}
-              coordinate={task.coordinates}
-              title={task.title}
-              description={task.description || `Выполнить: ${new Date(task.dueDate).toLocaleString('ru-RU')}`}
-            />
-          ))}
-        </MapView>
-      ) : (
+      {tasksWithCoordinates.length === 0 ? (
         <View style={{ 
           flex: 1, 
           justifyContent: 'center', 
@@ -202,16 +225,122 @@ const MapScreen = () => {
             Добавьте местоположение к задаче,{'\n'}
             чтобы увидеть ее на карте
           </Text>
-          
-          <Text style={{ 
-            color: colors.subtitle, 
-            fontSize: 14, 
-            marginTop: 20,
-            textAlign: 'center',
-            fontStyle: 'italic'
-          }}>
-            Поддерживаются: названия городов,{'\n'}
-            адреса, достопримечательности
+        </View>
+      ) : (
+        <>
+          {/* WebView с картой */}
+          <WebView
+            ref={webViewRef}
+            style={{ flex: 1 }}
+            source={{ html: generateMapHTML() }}
+            onMessage={handleWebViewMessage}
+            onError={(error) => {
+              console.log('WebView ошибка:', error);
+              setMapError('Ошибка загрузки карты');
+            }}
+            onLoadEnd={() => console.log('Карта загружена')}
+            javaScriptEnabled={true}
+            domStorageEnabled={true}
+            startInLoadingState={true}
+            renderLoading={() => (
+              <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+                <ActivityIndicator size="large" color={colors.primary} />
+                <Text style={{ color: colors.text, marginTop: 16 }}>Загрузка карты...</Text>
+              </View>
+            )}
+          />
+
+          {/* Панель выбранной задачи */}
+          {selectedTask && (
+            <View style={{
+              position: 'absolute',
+              bottom: 20,
+              left: 20,
+              right: 20,
+              backgroundColor: colors.card,
+              padding: 16,
+              borderRadius: 12,
+              borderLeftWidth: 4,
+              borderLeftColor: colors.primary,
+              shadowColor: '#000',
+              shadowOffset: { width: 0, height: 2 },
+              shadowOpacity: 0.3,
+              shadowRadius: 4,
+              elevation: 5,
+            }}>
+              <Text style={{ 
+                color: colors.text, 
+                fontSize: 18, 
+                fontWeight: 'bold', 
+                marginBottom: 8 
+              }}>
+                {selectedTask.title}
+              </Text>
+              
+              {selectedTask.description && (
+                <Text style={{ 
+                  color: colors.subtitle, 
+                  fontSize: 14, 
+                  marginBottom: 8,
+                  lineHeight: 20 
+                }}>
+                  {selectedTask.description}
+                </Text>
+              )}
+              
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Text style={{ 
+                  color: colors.subtitle, 
+                  fontSize: 12 
+                }}>
+                  {selectedTask.location}
+                </Text>
+                
+                <TouchableOpacity
+                  style={{
+                    backgroundColor: colors.primary,
+                    paddingHorizontal: 12,
+                    paddingVertical: 6,
+                    borderRadius: 6,
+                  }}
+                  onPress={() => openInExternalMaps(selectedTask)}
+                >
+                  <Text style={{ color: '#FFFFFF', fontSize: 12, fontWeight: '600' }}>
+                    Открыть в картах
+                  </Text>
+                </TouchableOpacity>
+              </View>
+              
+              <TouchableOpacity
+                style={{
+                  position: 'absolute',
+                  top: 8,
+                  right: 8,
+                }}
+                onPress={() => setSelectedTask(null)}
+              >
+                <Ionicons name="close" size={20} color={colors.subtitle} />
+              </TouchableOpacity>
+            </View>
+          )}
+        </>
+      )}
+
+      {/* Сообщение об ошибке */}
+      {mapError && (
+        <View style={{
+          position: 'absolute',
+          top: 100,
+          left: 20,
+          right: 20,
+          backgroundColor: colors.error + '20',
+          padding: 12,
+          borderRadius: 8,
+          borderLeftWidth: 4,
+          borderLeftColor: colors.error,
+        }}>
+          <Text style={{ color: colors.error, fontSize: 14 }}>
+            ⚠️ {mapError}
           </Text>
         </View>
       )}

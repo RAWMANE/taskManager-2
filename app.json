@@ -4,6 +4,7 @@
     "slug": "task-manager",
     "version": "1.0.0",
     "orientation": "portrait",
+    "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
     "splash": {
       "backgroundColor": "#ffffff"
@@ -12,18 +13,49 @@
       "**/*"
     ],
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.rawmane.taskmanager",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Это приложение использует ваше местоположение для отображения задач на карте.",
+        "NSLocationAlwaysUsageDescription": "Это приложение использует ваше местоположение для напоминаний о задачах."
+      }
     },
     "android": {
-      "package": "com.yourname.taskmanager"
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#FFFFFF"
+      },
+      "package": "com.rawmane.taskmanager",
+      "versionCode": 5,
+      "permissions": [
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.POST_NOTIFICATIONS"
+      ]
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
+    "plugins": [
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#ffffff"
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Разрешить Task Manager использовать ваше местоположение для карт и напоминаний о задачах."
+        }
+      ]
+    ],
     "extra": {
       "eas": {
         "projectId": "73f80672-3cd1-4848-b1ad-edcc429b039a"
       }
-    }
+    },
+    "owner": "rawmane"
   }
 }
